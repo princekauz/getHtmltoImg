@@ -1,59 +1,76 @@
-# Use official Python image as base
-FROM python:3.11-slim
+# Use an official Python runtime as a parent image
+FROM python:3.11-slim-bookworm
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    wget \
-    curl \
-    gnupg \
-    unzip \
-    fonts-liberation \
-    libnss3 \
-    libxss1 \
-    libasound2 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libcups2 \
-    libdbus-1-3 \
-    libdrm2 \
-    libx11-xcb1 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    xdg-utils \
-    --no-install-recommends && \
-    rm -rf /var/lib/apt/lists/*
+# 1. Install System Dependencies:
+#    - gnupg, wget: For adding external repositories and fetching files.
+#    - unzip: Needed to extract the downloaded chromedriver.zip.
+#    - curl: Used to parse the JSON API for latest chromedriver version.
+#    - xvfb: X Virtual Framebuffer, a dependency often needed for headless Chrome environments, even with --headless.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gnupg \
+        wget \
+        unzip \
+        curl && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
-# Install Google Chrome stable
-RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | apt-key add - && \
-    echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list && \
+# 2. Add Google Chrome Repository and Install Chrome:
+#    - Adds the official Google Chrome stable repository key and source.
+#    - Installs 'google-chrome-stable'.
+RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /etc/apt/keyrings/google-archive-keyring.gpg && \
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-archive-keyring.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list && \
     apt-get update && \
-    apt-get install -y google-chrome-stable && \
-    rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends \
+        google-chrome-stable && \
+    rm -rf /var/lib/apt/lists/* && \
+    apt-get clean
 
-# Install ChromeDriver (match Chrome version; adjust version accordingly)
-ENV CHROMEDRIVER_VERSION=114.0.5735.90
-RUN wget -O /tmp/chromedriver.zip "https://chromedriver.storage.googleapis.com/${CHROMEDRIVER_VERSION}/chromedriver_linux64.zip" && \
-    unzip /tmp/chromedriver.zip -d /usr/local/bin/ && \
-    rm /tmp/chromedriver.zip && \
-    chmod +x /usr/local/bin/chromedriver
+# 3. Dynamically Install the Correct ChromeDriver Version:
+#    This step ensures the installed ChromeDriver version precisely matches the installed Chrome version,
+#    preventing the SessionNotCreatedException.
+RUN CHROMIUM_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
+    echo "Detected Chrome Version: $CHROMIUM_VERSION" && \
+    # Fetch the exact ChromeDriver download URL from Google's Chrome for Testing JSON API
+    DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" | \
+                   grep -A 10 "$CHROMIUM_VERSION" | \
+                   grep -oE "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/[0-9\.]+/linux64/chromedriver-linux64.zip") && \
+    echo "Identified ChromeDriver download URL: ${DOWNLOAD_URL}" && \
+    if [ -z "$DOWNLOAD_URL" ]; then \
+        echo "Error: Could not find matching ChromeDriver download URL for Chrome version ${CHROMIUM_VERSION}. Exiting." && \
+        exit 1; \
+    fi && \
+    wget -q --continue --show-progress -O chromedriver.zip "$DOWNLOAD_URL" && \
+    unzip chromedriver.zip && \
+    mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
+    chmod +x /usr/bin/chromedriver && \
+    rm -rf chromedriver.zip chromedriver-linux64/
 
-# Set environment variables for Chrome and ChromeDriver
+# 4. Set Environment Variables:
+#    These are used by your Python application (main.py) to locate Chrome and ChromeDriver.
 ENV CHROME_BIN=/usr/bin/google-chrome
-ENV CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
-# Set work directory
+# 5. Set Working Directory inside the container:
 WORKDIR /app
 
-# Copy dependencies and install
+# 6. Copy and Install Python Dependencies:
+#    It's efficient to copy requirements.txt separately to leverage Docker layer caching.
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy app source code
+# 7. Copy Your Application Code:
 COPY . .
 
-# Expose port 10000 for Render
-EXPOSE 10000
+# 8. Create Static Files Directory:
+#    Ensures the directory for screenshots exists before the app starts.
+RUN mkdir -p static
 
-# Run the app with uvicorn on port 10000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "10000"]
+# 9. Expose Port:
+#    Informs Docker that the container listens on port 8000.
+EXPOSE 8000
+
+# 10. Define the Command to Run Your Application:
+#     Uvicorn starts your FastAPI app. Render.com typically maps internal port 8000
+#     to its public-facing port automatically.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

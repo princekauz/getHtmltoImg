@@ -8,6 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from fastapi.staticfiles import StaticFiles
 
+from selenium.webdriver.chrome.service import Service
 # Setup
 app = FastAPI()
 STATIC_DIR = "static"
@@ -31,10 +32,10 @@ def take_screenshots(html_content: str, unique_id: str) -> list[str]:
     options.add_argument("--window-size=1280,800")
     options.binary_location = os.getenv("CHROME_BIN", "/usr/bin/google-chrome")
 
-    driver = webdriver.Chrome(
-        executable_path=os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver"),
-        options=options
-    )
+
+service = Service(executable_path=CHROMEDRIVER_PATH)
+driver = webdriver.Chrome(service=service, options=options)
+
 
     screenshot_paths = []
     try:

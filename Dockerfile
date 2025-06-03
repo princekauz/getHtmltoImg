@@ -6,13 +6,15 @@ FROM python:3.11-slim-bookworm
 #    - unzip: Needed to extract the downloaded chromedriver.
 #    - curl: Used to retrieve the ChromeDriver version information.
 #    - xvfb: X Virtual Framebuffer, a dependency often needed for headless Chrome environments, even with --headless.
+#    - jq: For robust JSON parsing to find the correct ChromeDriver download URL.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         gnupg \
         wget \
         unzip \
         curl \
-        xvfb && \
+        xvfb \
+        jq && \  # Added jq here
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
@@ -30,16 +32,14 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
 # 3. Dynamically Install the Correct ChromeDriver Version:
 #    This step ensures the installed ChromeDriver version precisely matches the installed Chrome version.
 #    We will use the Chrome for Testing API, which is the official source for Chrome 115+.
-#    Install jq for robust JSON parsing
-RUN apt-get update && apt-get install -y --no-install-recommends jq && \
-    rm -rf /var/lib/apt/lists/* && apt-get clean && \
-    CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
+#    The `jq` command is used for robust JSON parsing.
+RUN CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
     echo "Detected Chrome Version: $CHROME_VERSION" && \
     CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d '.' -f 1) && \
     echo "Extracted Chrome Major Version: ${CHROME_MAJOR_VERSION}" && \
     \
     # Attempt to find the ChromeDriver URL using jq for the exact Chrome version first.
-    # If not found, fall back to finding the latest ChromeDriver for the major version.
+    # If not found, fall back to finding the latest available ChromeDriver for the major version.
     DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json" | \
                    jq -r --arg chrome_v "$CHROME_VERSION" \
                    '.versions[] | select(.version == $chrome_v) | .downloads.chromedriver[] | select(.platform == "linux64") | .url') && \
@@ -60,14 +60,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends jq && \
     # Download, unzip, move, and cleanup ChromeDriver
     wget -q --continue --show-progress -O chromedriver.zip "$DOWNLOAD_URL" && \
     unzip -o chromedriver.zip -d /tmp/chromedriver_extract && \
-    mv /tmp/chromedriver_extract/chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
-    chmod +x /usr/bin/chromedriver && \
+    # !!! IMPORTANT CHANGE HERE: Move to /usr/local/bin/chromedriver !!!
+    mv /tmp/chromedriver_extract/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver && \
     rm -rf chromedriver.zip /tmp/chromedriver_extract
 
 # 4. Set Environment Variables:
 #    These are used by your Python application (main.py) to locate Chrome and ChromeDriver.
 ENV CHROME_BIN=/usr/bin/google-chrome
-ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+# !!! IMPORTANT CHANGE HERE: Update CHROMEDRIVER_PATH to /usr/local/bin/chromedriver !!!
+ENV CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
 # 5. Set Working Directory inside the container:
 WORKDIR /app

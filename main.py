@@ -24,7 +24,8 @@ app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 # ENV CHROME_BIN=/usr/bin/google-chrome
 #
 # If running locally, you'd replace these with the actual paths on your system.
-CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "/usr/bin/chromedriver") # Default for Render
+# !!! IMPORTANT CHANGE HERE: Set default to /usr/local/bin/chromedriver !!!
+CHROMEDRIVER_PATH = os.getenv("CHROMEDRIVER_PATH", "/usr/local/bin/chromedriver")
 CHROME_BIN = os.getenv("CHROME_BIN", "/usr/bin/google-chrome") # Default for Render
 
 

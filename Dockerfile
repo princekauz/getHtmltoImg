@@ -29,37 +29,40 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
 
 # 3. Dynamically Install the Correct ChromeDriver Version:
 #    This step ensures the installed ChromeDriver version precisely matches the installed Chrome version.
-#    We will try to use the chrome-for-testing API which is the official source.
-#    Note: This API sometimes returns the full version string like "114.0.5735.90",
-#    or the short major version. Our parsing tries to be flexible.
-RUN CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
+#    We will use the Chrome for Testing API, which is the official source for Chrome 115+.
+#    Install jq for robust JSON parsing
+RUN apt-get update && apt-get install -y --no-install-recommends jq && \
+    rm -rf /var/lib/apt/lists/* && apt-get clean && \
+    CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
     echo "Detected Chrome Version: $CHROME_VERSION" && \
-    # Fetch the download URL from the JSON API for the detected Chrome version
-    # This approach assumes 'downloads' and 'chromedriver' will be under 'versions' with a matching 'version' string.
-    DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" | \
-                   grep -B 10 -A 10 "\"version\": \"$CHROME_VERSION\"" | \
-                   grep -oE "\"chromedriver\":.*\"url\": \"[^\"]+\"" | \
-                   grep -oE "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/[0-9\.]+/linux64/chromedriver-linux64.zip") && \
+    CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d '.' -f 1) && \
+    echo "Extracted Chrome Major Version: ${CHROME_MAJOR_VERSION}" && \
+    \
+    # Attempt to find the ChromeDriver URL using jq for the exact Chrome version first.
+    # If not found, fall back to finding the latest ChromeDriver for the major version.
+    DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json" | \
+                   jq -r --arg chrome_v "$CHROME_VERSION" \
+                   '.versions[] | select(.version == $chrome_v) | .downloads.chromedriver[] | select(.platform == "linux64") | .url') && \
+    \
+    if [ -z "$DOWNLOAD_URL" ]; then \
+        echo "No exact match found for ${CHROME_VERSION}. Attempting to find the latest available ChromeDriver for major version ${CHROME_MAJOR_VERSION}." && \
+        DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/known-good-versions-with-downloads.json" | \
+                       jq -r --arg major_v "$CHROME_MAJOR_VERSION" \
+                       '.versions[] | select(.version | startswith($major_v + ".")) | .downloads.chromedriver[] | select(.platform == "linux64") | .url' | tail -n 1); \
+    fi && \
+    \
     echo "Identified ChromeDriver download URL: ${DOWNLOAD_URL}" && \
     if [ -z "$DOWNLOAD_URL" ]; then \
-        echo "Error: Could not find matching ChromeDriver download URL for Chrome version ${CHROME_VERSION} from the main API. Trying a fallback..." && \
-        # Fallback for Chrome versions 114 and older that might not be in the exact JSON format or specific stable builds
-        CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d '.' -f 1) && \
-        echo "Trying fallback with major version ${CHROME_MAJOR_VERSION}" && \
-        DOWNLOAD_URL=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR_VERSION}" | \
-                       xargs -I {} echo "https://chromedriver.storage.googleapis.com/{}/chromedriver_linux64.zip") && \
-        echo "Fallback URL: ${DOWNLOAD_URL}" && \
-        if [ -z "$DOWNLOAD_URL" ]; then \
-            echo "Error: Fallback also failed to find a matching ChromeDriver download URL. Exiting." && \
-            exit 1; \
-        fi; \
+        echo "Error: Could not find matching ChromeDriver download URL for Chrome version ${CHROME_VERSION}. Exiting." && \
+        exit 1; \
     fi && \
+    \
     # Download, unzip, move, and cleanup ChromeDriver
     wget -q --continue --show-progress -O chromedriver.zip "$DOWNLOAD_URL" && \
-    unzip chromedriver.zip && \
-    mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
+    unzip -o chromedriver.zip -d /tmp/chromedriver_extract && \
+    mv /tmp/chromedriver_extract/chromedriver-linux64/chromedriver /usr/bin/chromedriver && \
     chmod +x /usr/bin/chromedriver && \
-    rm -rf chromedriver.zip chromedriver-linux64/
+    rm -rf chromedriver.zip /tmp/chromedriver_extract
 
 # 4. Set Environment Variables:
 #    These are used by your Python application (main.py) to locate Chrome and ChromeDriver.

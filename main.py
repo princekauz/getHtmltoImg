@@ -107,5 +107,5 @@ async def screenshot_html(data: HTMLInput, background_tasks: BackgroundTasks):
     
     # Construct full URLs for the client response
     # Replace "https://your-service-name.onrender.com" with your actual Render service URL
-    full_urls = [f"https://gethtmltoimg.onrender.com/{path}" for path in urls]
+    full_urls = [f"https://gethtmltoimg.onrender.com{path}" for path in urls]
     return {"images": full_urls}

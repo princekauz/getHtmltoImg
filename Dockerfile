@@ -2,19 +2,11 @@
 FROM python:3.11-slim-bookworm
 
 # 1. Install System Dependencies:
-#    - gnupg, wget: For adding external repositories and fetching files.
-#    - unzip: Needed to extract the downloaded chromedriver.
-#    - curl: Used to retrieve the ChromeDriver version information.
-#    - xvfb: X Virtual Framebuffer, a dependency often needed for headless Chrome environments, even with --headless.
+#    - gnupg, wget, unzip, curl, xvfb: General utilities and headless display.
 #    - jq: For robust JSON parsing to find the correct ChromeDriver download URL.
+#    All commands for this step are chained within a single RUN instruction.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-        gnupg \
-        wget \
-        unzip \
-        curl \
-        xvfb \
-        jq && \  # Added jq here
+    apt-get install -y --no-install-recommends gnupg wget unzip curl xvfb jq && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
@@ -60,7 +52,6 @@ RUN CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
     # Download, unzip, move, and cleanup ChromeDriver
     wget -q --continue --show-progress -O chromedriver.zip "$DOWNLOAD_URL" && \
     unzip -o chromedriver.zip -d /tmp/chromedriver_extract && \
-    # !!! IMPORTANT CHANGE HERE: Move to /usr/local/bin/chromedriver !!!
     mv /tmp/chromedriver_extract/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
     chmod +x /usr/local/bin/chromedriver && \
     rm -rf chromedriver.zip /tmp/chromedriver_extract
@@ -68,7 +59,6 @@ RUN CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
 # 4. Set Environment Variables:
 #    These are used by your Python application (main.py) to locate Chrome and ChromeDriver.
 ENV CHROME_BIN=/usr/bin/google-chrome
-# !!! IMPORTANT CHANGE HERE: Update CHROMEDRIVER_PATH to /usr/local/bin/chromedriver !!!
 ENV CHROMEDRIVER_PATH=/usr/local/bin/chromedriver
 
 # 5. Set Working Directory inside the container:

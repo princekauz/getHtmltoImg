@@ -3,15 +3,16 @@ FROM python:3.11-slim-bookworm
 
 # 1. Install System Dependencies:
 #    - gnupg, wget: For adding external repositories and fetching files.
-#    - unzip: Needed to extract the downloaded chromedriver.zip.
-#    - curl: Used to parse the JSON API for latest chromedriver version.
+#    - unzip: Needed to extract the downloaded chromedriver.
+#    - curl: Used to retrieve the ChromeDriver version information.
 #    - xvfb: X Virtual Framebuffer, a dependency often needed for headless Chrome environments, even with --headless.
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         gnupg \
         wget \
         unzip \
-        curl && \
+        curl \
+        xvfb && \
     rm -rf /var/lib/apt/lists/* && \
     apt-get clean
 
@@ -27,19 +28,33 @@ RUN wget -q -O - https://dl.google.com/linux/linux_signing_key.pub | gpg --dearm
     apt-get clean
 
 # 3. Dynamically Install the Correct ChromeDriver Version:
-#    This step ensures the installed ChromeDriver version precisely matches the installed Chrome version,
-#    preventing the SessionNotCreatedException.
-RUN CHROMIUM_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
-    echo "Detected Chrome Version: $CHROMIUM_VERSION" && \
-    # Fetch the exact ChromeDriver download URL from Google's Chrome for Testing JSON API
+#    This step ensures the installed ChromeDriver version precisely matches the installed Chrome version.
+#    We will try to use the chrome-for-testing API which is the official source.
+#    Note: This API sometimes returns the full version string like "114.0.5735.90",
+#    or the short major version. Our parsing tries to be flexible.
+RUN CHROME_VERSION=$(google-chrome-stable --version | cut -d ' ' -f 3) && \
+    echo "Detected Chrome Version: $CHROME_VERSION" && \
+    # Fetch the download URL from the JSON API for the detected Chrome version
+    # This approach assumes 'downloads' and 'chromedriver' will be under 'versions' with a matching 'version' string.
     DOWNLOAD_URL=$(curl -s "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json" | \
-                   grep -A 10 "$CHROMIUM_VERSION" | \
+                   grep -B 10 -A 10 "\"version\": \"$CHROME_VERSION\"" | \
+                   grep -oE "\"chromedriver\":.*\"url\": \"[^\"]+\"" | \
                    grep -oE "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/[0-9\.]+/linux64/chromedriver-linux64.zip") && \
     echo "Identified ChromeDriver download URL: ${DOWNLOAD_URL}" && \
     if [ -z "$DOWNLOAD_URL" ]; then \
-        echo "Error: Could not find matching ChromeDriver download URL for Chrome version ${CHROMIUM_VERSION}. Exiting." && \
-        exit 1; \
+        echo "Error: Could not find matching ChromeDriver download URL for Chrome version ${CHROME_VERSION} from the main API. Trying a fallback..." && \
+        # Fallback for Chrome versions 114 and older that might not be in the exact JSON format or specific stable builds
+        CHROME_MAJOR_VERSION=$(echo "$CHROME_VERSION" | cut -d '.' -f 1) && \
+        echo "Trying fallback with major version ${CHROME_MAJOR_VERSION}" && \
+        DOWNLOAD_URL=$(curl -s "https://chromedriver.storage.googleapis.com/LATEST_RELEASE_${CHROME_MAJOR_VERSION}" | \
+                       xargs -I {} echo "https://chromedriver.storage.googleapis.com/{}/chromedriver_linux64.zip") && \
+        echo "Fallback URL: ${DOWNLOAD_URL}" && \
+        if [ -z "$DOWNLOAD_URL" ]; then \
+            echo "Error: Fallback also failed to find a matching ChromeDriver download URL. Exiting." && \
+            exit 1; \
+        fi; \
     fi && \
+    # Download, unzip, move, and cleanup ChromeDriver
     wget -q --continue --show-progress -O chromedriver.zip "$DOWNLOAD_URL" && \
     unzip chromedriver.zip && \
     mv chromedriver-linux64/chromedriver /usr/bin/chromedriver && \

@@ -1,3 +1,5 @@
 fastapi
-uvicorn[standard]
-playwright
+selenium
+uvicorn
+pydantic
+python-multipart
